@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0f172a">
+  <title>PC Remote Control</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="status" id="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Connecting...</span>
+      </div>
+      <h1 class="title">PC Remote</h1>
+      <button class="icon-btn" id="menuBtn" title="Settings">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </header>
+
+    <!-- Screen Viewer -->
+    <div class="screen-container" id="screenContainer">
+      <img class="screen-img" id="screenImg" alt="Remote Screen" draggable="false">
+      <div class="overlay" id="overlay">Connecting to your PC...</div>
+      <div class="click-indicator" id="clickIndicator"></div>
+    </div>
+
+    <!-- Control Bar -->
+    <div class="control-bar" id="controlBar">
+      <button class="ctrl-btn" id="btnMouse" title="Mouse mode">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="3" width="12" height="18" rx="6"/><line x1="12" y1="7" x2="12" y2="11"/></svg>
+        <span>Mouse</span>
+      </button>
+      <button class="ctrl-btn" id="btnKeyboard" title="Keyboard">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h2M10 8h2M14 8h2M18 8h2M6 12h2M10 12h2M14 12h2M18 12h2M8 16h8"/></svg>
+        <span>Keys</span>
+      </button>
+      <button class="ctrl-btn" id="btnAI" title="AI Assistant">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><path d="M9 21h6"/></svg>
+        <span>AI</span>
+      </button>
+      <button class="ctrl-btn" id="btnScreenshot" title="Screenshot">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span>Capture</span>
+      </button>
+      <button class="ctrl-btn" id="btnNav" title="Navigation">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9l4-4 4 4"/><path d="M9 5v14"/><path d="M15 15l4 4 4-4"/><path d="M19 19V5"/></svg>
+        <span>Nav</span>
+      </button>
+    </div>
+
+    <!-- Navigation Pad Panel -->
+    <div class="panel" id="navPanel">
+      <div class="panel-header">
+        <span>Navigation</span>
+        <button class="close-btn" id="closeNav">&times;</button>
+      </div>
+      <div class="nav-pad">
+        <button class="nav-btn nav-up" data-key="up">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+        </button>
+        <button class="nav-btn nav-left" data-key="left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="nav-btn nav-center" data-key="enter">OK</button>
+        <button class="nav-btn nav-right" data-key="right">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button class="nav-btn nav-down" data-key="down">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
+      <div class="nav-row">
+        <button class="action-btn" data-key="esc">Esc</button>
+        <button class="action-btn" data-key="tab">Tab</button>
+        <button class="action-btn" data-key="space">Space</button>
+        <button class="action-btn" data-key="delete">Del</button>
+      </div>
+      <div class="nav-row">
+        <button class="action-btn" data-key="home">Home</button>
+        <button class="action-btn" data-key="end">End</button>
+        <button class="action-btn" data-key="pageup">PgUp</button>
+        <button class="action-btn" data-key="pagedown">PgDn</button>
+      </div>
+    </div>
+
+    <!-- Keyboard Panel -->
+    <div class="panel" id="keyboardPanel">
+      <div class="panel-header">
+        <span>Keyboard</span>
+        <button class="close-btn" id="closeKeyboard">&times;</button>
+      </div>
+      <div class="text-input-row">
+        <input type="text" class="text-input" id="textInput" placeholder="Type and press Enter..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button class="send-text-btn" id="sendTextBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+      <div class="kbd">
+        <div class="kbd-row">
+          <button class="k" data-k="q">Q</button><button class="k" data-k="w">W</button><button class="k" data-k="e">E</button>
+          <button class="k" data-k="r">R</button><button class="k" data-k="t">T</button><button class="k" data-k="y">Y</button>
+          <button class="k" data-k="u">U</button><button class="k" data-k="i">I</button><button class="k" data-k="o">O</button>
+          <button class="k" data-k="p">P</button>
+        </div>
+        <div class="kbd-row">
+          <button class="k" data-k="a">A</button><button class="k" data-k="s">S</button><button class="k" data-k="d">D</button>
+          <button class="k" data-k="f">F</button><button class="k" data-k="g">G</button><button class="k" data-k="h">H</button>
+          <button class="k" data-k="j">J</button><button class="k" data-k="k">K</button><button class="k" data-k="l">L</button>
+        </div>
+        <div class="kbd-row">
+          <button class="k k-shift" id="shiftBtn" data-action="shift">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l-8 8h5v8h6v-8h5z"/></svg>
+          </button>
+          <button class="k" data-k="z">Z</button><button class="k" data-k="x">X</button>
+          <button class="k" data-k="c">C</button><button class="k" data-k="v">V</button>
+          <button class="k" data-k="b">B</button><button class="k" data-k="n">N</button>
+          <button class="k" data-k="m">M</button>
+          <button class="k k-wide" data-action="backspace">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+          </button>
+        </div>
+        <div class="kbd-row">
+          <button class="k k-fn" data-action="fn">Fn</button>
+          <button class="k" data-action="ctrl">Ctrl</button>
+          <button class="k" data-action="alt">Alt</button>
+          <button class="k k-space" data-k=" ">Space</button>
+          <button class="k k-wide" data-action="enter">Enter</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Chat Panel -->
+    <div class="panel" id="aiPanel">
+      <div class="panel-header">
+        <span>AI Assistant</span>
+        <button class="close-btn" id="closeAI">&times;</button>
+      </div>
+      <div class="ai-messages" id="aiMessages">
+        <div class="ai-welcome">
+          <strong>PC Control AI</strong><br>
+          Tell me what to do! Try:<br>
+          "Open Chrome"<br>
+          "Open the Start menu"<br>
+          "Type hello world"<br>
+          "Take a screenshot"
+        </div>
+      </div>
+      <div class="ai-input-row">
+        <input type="text" class="ai-input" id="aiInput" placeholder="Ask AI to do something...">
+        <button class="ai-send-btn" id="aiSendBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="panel" id="settingsPanel">
+      <div class="panel-header">
+        <span>Settings</span>
+        <button class="close-btn" id="closeSettings">&times;</button>
+      </div>
+      <div class="settings-content">
+        <div class="setting-row">
+          <label>Quality</label>
+          <input type="range" id="qualityRange" min="10" max="100" value="70">
+          <span id="qualityValue">70</span>
+        </div>
+        <div class="setting-row">
+          <label>Speed (FPS)</label>
+          <input type="range" id="fpsRange" min="5" max="30" value="20">
+          <span id="fpsValue">20</span>
+        </div>
+        <div class="setting-row">
+          <label>Scale</label>
+          <input type="range" id="scaleRange" min="25" max="100" value="50">
+          <span id="scaleValue">50%</span>
+        </div>
+        <div class="setting-row">
+          <label>Claude API Key</label>
+          <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="flex:1; margin-left:8px;">
+        </div>
+        <div class="setting-row">
+          <label>Password</label>
+          <input type="password" id="passwordInput" placeholder="Optional" style="flex:1; margin-left:8px;">
+        </div>
+        <div class="setting-actions">
+          <button class="btn-primary" id="saveSettings">Save</button>
+          <button class="btn-secondary" id="resetSettings">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Action Buttons -->
+    <div class="quick-actions" id="quickActions">
+      <button class="qa-btn" data-action="open-browser" title="Open Browser">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      </button>
+      <button class="qa-btn" data-action="open-files" title="Open File Explorer">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="qa-btn" data-action="open-terminal" title="Open Terminal">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      </button>
+      <button class="qa-btn" data-action="copy" title="Ctrl+C">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+      <button class="qa-btn" data-action="paste" title="Ctrl+V">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+      </button>
+      <button class="qa-btn" data-action="task-manager" title="Task Manager">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      </button>
+      <button class="qa-btn" data-action="desktop" title="Show Desktop">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </button>
+      <button class="qa-btn" data-action="lock" title="Lock PC">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
