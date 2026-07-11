@@ -123,6 +123,60 @@ Now you can chat with the AI! Try commands like:
 
 ---
 
+## Remote Access from Anywhere (Tailscale)
+
+By default this app only works when your phone and PC are on the same WiFi,
+because the server listens on your PC's private network address. To control
+your PC from anywhere (mobile data, another city), use **Tailscale** — a free
+personal VPN that connects your devices privately without exposing your PC to
+the public internet.
+
+### Step 1: Install Tailscale on your PC
+
+1. Go to https://tailscale.com/download
+2. Download and install Tailscale for your OS (Windows/Mac/Linux)
+3. Sign in with a Google, Microsoft, GitHub, or Apple account
+
+### Step 2: Install Tailscale on your phone
+
+1. Install the **Tailscale** app from the App Store (iPhone) or Play Store (Android)
+2. Sign in with the **same account** you used on your PC
+3. Turn the VPN toggle **on**
+
+### Step 3: Find your PC's Tailscale IP
+
+On your PC, click the Tailscale tray icon (or run `tailscale ip -4` in a
+terminal). You'll see an address like `100.101.102.103` — this is your PC's
+permanent private address, reachable from your phone anywhere in the world.
+
+If MagicDNS is enabled (it is by default), you can also use your PC's device
+name, e.g. `http://my-pc:8080`.
+
+### Step 4: Connect
+
+1. Start the server on your PC as usual (`run.bat` / `./run.sh`)
+2. On your phone (Tailscale toggle on), open: `http://100.101.102.103:8080`
+   (using your PC's actual Tailscale IP)
+
+That's it — no router configuration, no port forwarding, and only devices
+signed into **your** Tailscale account can reach your PC.
+
+### Keep your PC reachable while you're away
+
+- Disable sleep/hibernation in your PC's power settings (or set it to
+  "never sleep" while plugged in), otherwise the server stops responding
+- Leave the PC Remote Controller server running before you leave
+- Optional: add the URL to your phone's home screen for one-tap access
+
+### Why not port forwarding or public tunnels?
+
+Exposing this app directly to the internet (router port forwarding, ngrok,
+etc.) is **strongly discouraged**: the app uses unencrypted HTTP and has no
+enforced authentication, so anyone who finds the port gets full control of
+your PC. Tailscale keeps the connection private and encrypted end-to-end.
+
+---
+
 ## Troubleshooting
 
 ### "Cannot connect" on phone
