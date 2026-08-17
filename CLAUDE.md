@@ -19,11 +19,20 @@ enters the password from `.env` (`AUTH_PASSWORD=...`) via the gear icon.
 
 ## Current priority: make it function properly
 
-Fixes exist on branch `fix/working-setup-and-auth` — **PR #1 is open and unmerged** (merge it: `gh pr merge 1`).
+PR #1 (working setup + auth) is merged. Still unverified on an actual phone (desktop checks
+passed): latched Ctrl/Alt (tap Ctrl then C → real copy, not a typed "c"), double-tap → exactly one
+double-click, click ripple lands under the fingertip, Reset applies immediately, error toast on
+wrong password — plus the pro-controls gestures below.
 
-Still unverified on an actual phone (desktop checks passed): latched Ctrl/Alt (tap Ctrl then C → real
-copy, not a typed "c"), double-tap → exactly one double-click, click ripple lands under the fingertip,
-Reset applies immediately, error toast on wrong password.
+## Touch gestures (app.js)
+
+One two-finger gesture = one mode, decided by first movement: finger distance change → pinch zoom
+(CSS transform on `#screenImg` only — `getBoundingClientRect()` reflects transforms, so all
+coordinate math works unchanged while zoomed); parallel motion → scroll at 1×, pan when zoomed.
+`gesture.multiTouch` suppresses `touchend` clicks until every finger lifts. One finger: tap =
+click, double-tap = double click (second single click suppressed), long-press = right click,
+**double-tap-and-hold + move = drag** (sent as one-shot `mouse_drag` on release). Zoom badge
+(top-left) resets zoom; its events must not bubble into the screen container.
 
 ## Known issues (ordered by impact)
 
@@ -31,13 +40,14 @@ Reset applies immediately, error toast on wrong password.
    what it would do but nothing is parsed or executed. The README oversells this. Real fix: tool-use
    loop feeding `InputController` (and a current model — the class-signature default is still the
    deprecated `claude-3-haiku-20240307`).
-2. **Drag is unreachable.** Server handles `mouse_drag` but the frontend never sends it — no
-   drag-select or window dragging.
-3. **Multi-monitor mismatch.** Capture uses `mss monitors[0]` (all-monitor union); input scales via
+2. **Multi-monitor mismatch.** Capture uses `mss monitors[0]` (all-monitor union); input scales via
    `pyautogui.size()` (primary). Identical on this single-monitor PC; clicks misalign with 2+ monitors.
-4. **Config is global.** A `config` message mutates process-wide singletons — last client wins.
-5. **Plain HTTP.** Password and screen content cross the LAN unencrypted. Fine on home WiFi; use
-   Tailscale for anything beyond it. Never port-forward this to the internet.
+3. **Config is global.** A `config` message mutates process-wide singletons — last client wins.
+4. **Plain HTTP.** Password and screen content cross the LAN unencrypted. Fine on home WiFi; use
+   Tailscale for anything beyond it (PC is `100.125.169.102` on Mohamed's tailnet). Never
+   port-forward this to the internet.
+5. **Drag is one-shot.** Double-tap-hold sends a single `mouse_drag` from→to on release; there is
+   no live drag feedback while the finger moves.
 
 ## Rules — each exists because of a real bug here
 
