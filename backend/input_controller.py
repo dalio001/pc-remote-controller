@@ -145,7 +145,12 @@ class InputController:
 
     @staticmethod
     def execute_command(command: str):
-        """Execute a system command or open an application."""
+        """Run a shell command. CALLERS MUST PASS A VETTED CONSTANT.
+
+        shell=True below means an attacker-controlled string here is remote code
+        execution. The only caller, /api/execute, looks the command up in
+        main.ALLOWED_COMMANDS and 400s on anything else - keep it that way.
+        """
         try:
             if sys.platform == "win32":
                 subprocess.Popen(command, shell=True)

@@ -21,5 +21,14 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
 # Security
 AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")
 
+# Public tunnel (ngrok). Off by default: enabling it publishes this PC to the
+# internet, where the only thing between a stranger and full mouse/keyboard
+# control is AUTH_PASSWORD.
+ENABLE_TUNNEL = os.getenv("ENABLE_TUNNEL", "false").lower() == "true"
+NGROK_AUTHTOKEN = os.getenv("NGROK_AUTHTOKEN", "")
+NGROK_DOMAIN = os.getenv("NGROK_DOMAIN", "")
+# Minimum password length accepted when the tunnel is on.
+MIN_PUBLIC_PASSWORD_LEN = 12
+
 # Paths
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
