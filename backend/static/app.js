@@ -12,6 +12,10 @@ const state = {
   pingInterval: null,
   lastClickTimer: null,
   modifiers: { ctrl: false, alt: false },
+  // Client-side zoom of the remote screen. Implemented as a CSS transform on the
+  // image, so getBoundingClientRect() - and therefore every existing coordinate
+  // calculation - keeps working untouched.
+  view: { zoom: 1, panX: 0, panY: 0 },
   settings: {
     quality: +localStorage.getItem('quality') || 70,
     fps: +localStorage.getItem('fps') || 20,
@@ -34,6 +38,7 @@ const els = {
   fpsRange: $('fpsRange'), fpsValue: $('fpsValue'),
   scaleRange: $('scaleRange'), scaleValue: $('scaleValue'),
   apiKeyInput: $('apiKeyInput'), passwordInput: $('passwordInput'),
+  zoomBadge: $('zoomBadge'), fullscreenBtn: $('fullscreenBtn'),
 };
 
 // ===== WebSocket =====
@@ -110,7 +115,87 @@ function updateStatus(status) {
 }
 
 // ===== Touch Input =====
-let touchState = { startX: 0, startY: 0, startTime: 0, longPressTimer: null, moved: false };
+let touchState = { startX: 0, startY: 0, startTime: 0, longPressTimer: null, moved: false, maybeDrag: false, dragging: false };
+let lastTap = 0;
+
+// One two-finger gesture = one mode, decided by how the fingers move first:
+// distance change -> pinch, parallel motion -> scroll (at 1x) or pan (zoomed in).
+// multiTouch stays true until every finger lifts, so touchend can never turn the
+// tail of a two-finger gesture into a stray click.
+let gesture = { mode: null, multiTouch: false, startDist: 0, startZoom: 1, startPanX: 0, startPanY: 0, startMidX: 0, startMidY: 0, lastScrollY: 0, baseW: 0, baseH: 0 };
+
+// ===== View (pinch zoom / pan) =====
+// Zoom is a CSS transform on the image only. Layout is untouched, and
+// getBoundingClientRect() reflects transforms, so getRelativePos() and
+// showClickIndicator() keep working with zero changes while zoomed.
+function applyView(baseW, baseH) {
+  const v = state.view;
+  v.zoom = Math.max(1, Math.min(5, v.zoom));
+  if (v.zoom === 1) { v.panX = 0; v.panY = 0; }
+  else if (baseW) {
+    // Keep the scaled image covering the container; no panning it fully away.
+    const cont = els.screenContainer.getBoundingClientRect();
+    const maxX = Math.max(0, (v.zoom * baseW - cont.width) / 2);
+    const maxY = Math.max(0, (v.zoom * baseH - cont.height) / 2);
+    v.panX = Math.max(-maxX, Math.min(maxX, v.panX));
+    v.panY = Math.max(-maxY, Math.min(maxY, v.panY));
+  }
+  els.screenImg.style.transform = v.zoom === 1 ? '' : `translate(${v.panX}px, ${v.panY}px) scale(${v.zoom})`;
+  els.zoomBadge.textContent = v.zoom.toFixed(1) + '×';
+  els.zoomBadge.classList.toggle('show', v.zoom > 1);
+}
+
+function beginTwoFinger(e) {
+  clearTimeout(touchState.longPressTimer);
+  touchState.maybeDrag = false; touchState.dragging = false;
+  const t0 = e.touches[0], t1 = e.touches[1];
+  const img = els.screenImg.getBoundingClientRect();
+  gesture = {
+    mode: null, multiTouch: true,
+    startDist: Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY),
+    startZoom: state.view.zoom, startPanX: state.view.panX, startPanY: state.view.panY,
+    startMidX: (t0.clientX + t1.clientX) / 2, startMidY: (t0.clientY + t1.clientY) / 2,
+    lastScrollY: (t0.clientY + t1.clientY) / 2,
+    // Displayed (untransformed) image size, for pan clamping.
+    baseW: img.width / state.view.zoom, baseH: img.height / state.view.zoom,
+  };
+}
+
+function twoFingerMove(e) {
+  const t0 = e.touches[0], t1 = e.touches[1];
+  const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+  const midX = (t0.clientX + t1.clientX) / 2, midY = (t0.clientY + t1.clientY) / 2;
+
+  if (!gesture.mode) {
+    if (gesture.startDist > 0 && Math.abs(dist / gesture.startDist - 1) > 0.08) gesture.mode = 'pinch';
+    else if (Math.hypot(midX - gesture.startMidX, midY - gesture.startMidY) > 12)
+      gesture.mode = state.view.zoom > 1 ? 'pan' : 'scroll';
+    else return;
+  }
+
+  if (gesture.mode === 'scroll') {
+    const delta = Math.round((gesture.lastScrollY - midY) / 15);
+    if (delta) {
+      const pos = getRelativePos(e);
+      send({ type: 'scroll', x: pos.x, y: pos.y, delta });
+      gesture.lastScrollY = midY;
+    }
+    return;
+  }
+
+  // pinch / pan: keep the image point that started under the fingers' midpoint
+  // anchored to wherever the midpoint is now.
+  const v = state.view;
+  if (gesture.mode === 'pinch') v.zoom = gesture.startZoom * (dist / gesture.startDist);
+  const z = Math.max(1, Math.min(5, v.zoom));
+  const cont = els.screenContainer.getBoundingClientRect();
+  const cx = cont.left + cont.width / 2, cy = cont.top + cont.height / 2;
+  const ux = (gesture.startMidX - cx - gesture.startPanX) / gesture.startZoom;
+  const uy = (gesture.startMidY - cy - gesture.startPanY) / gesture.startZoom;
+  v.panX = midX - cx - ux * z;
+  v.panY = midY - cy - uy * z;
+  applyView(gesture.baseW, gesture.baseH);
+}
 
 function getRelativePos(e) {
   const rect = els.screenImg.getBoundingClientRect();
@@ -139,37 +224,57 @@ function showClickIndicator(x, y) {
 
 els.screenContainer.addEventListener('touchstart', (e) => {
   if (!state.connected) { connect(); return; }
-  if (e.touches.length === 2) return;
+  if (e.touches.length === 2) { beginTwoFinger(e); return; }
+  if (e.touches.length > 2 || gesture.multiTouch) return;
   const pos = getRelativePos(e);
-  touchState = { startX: pos.x, startY: pos.y, startTime: Date.now(), moved: false };
-  touchState.longPressTimer = setTimeout(() => {
-    if (!touchState.moved) {
-      send({ type: 'mouse_right_click', x: touchState.startX, y: touchState.startY });
-      showClickIndicator(touchState.startX, touchState.startY);
-      navigator.vibrate?.(20);
-    }
-  }, 500);
+  // Second touch within 300ms of a tap: hold + move becomes a drag
+  // (double-tap-and-hold, same gesture as the Microsoft RD client).
+  const maybeDrag = Date.now() - lastTap < 300;
+  touchState = { startX: pos.x, startY: pos.y, startTime: Date.now(), moved: false, maybeDrag, dragging: false };
+  if (!maybeDrag) {
+    touchState.longPressTimer = setTimeout(() => {
+      if (!touchState.moved) {
+        send({ type: 'mouse_right_click', x: touchState.startX, y: touchState.startY });
+        showClickIndicator(touchState.startX, touchState.startY);
+        navigator.vibrate?.(20);
+      }
+    }, 500);
+  }
 }, { passive: true });
 
 els.screenContainer.addEventListener('touchmove', (e) => {
   if (!state.connected) return;
-  if (e.touches.length === 2) { e.preventDefault(); return; }
+  if (e.touches.length >= 2) { e.preventDefault(); twoFingerMove(e); return; }
+  if (gesture.multiTouch) return;  // leftover finger from a two-finger gesture
   const pos = getRelativePos(e);
   const dx = Math.abs(pos.x - touchState.startX);
   const dy = Math.abs(pos.y - touchState.startY);
   if (dx > 0.01 || dy > 0.01) { touchState.moved = true; clearTimeout(touchState.longPressTimer); }
-  if (touchState.moved && Date.now() - touchState.startTime > 100) send({ type: 'mouse_move', x: pos.x, y: pos.y });
+  if (!touchState.moved) return;
+  if (touchState.maybeDrag) { touchState.dragging = true; return; }  // released as mouse_drag in touchend
+  if (Date.now() - touchState.startTime > 100) send({ type: 'mouse_move', x: pos.x, y: pos.y });
 }, { passive: false });
 
 // Single tap vs double tap is decided in ONE handler. Splitting it across two
 // independent touchend listeners meant a double tap emitted click + click +
 // double_click - four physical button events - which opened things twice.
-let lastTap = 0;
 els.screenContainer.addEventListener('touchend', (e) => {
+  if (gesture.multiTouch) {
+    // End of (or leftover finger from) a two-finger gesture - never a click.
+    if (e.touches.length === 0) { gesture.multiTouch = false; gesture.mode = null; lastTap = 0; }
+    return;
+  }
   if (!state.connected) return;
   clearTimeout(touchState.longPressTimer);
   const elapsed = Date.now() - touchState.startTime;
   const pos = getRelativePos(e.changedTouches[0] ? { touches: [e.changedTouches[0]] } : e);
+  if (touchState.dragging) {
+    send({ type: 'mouse_drag', fromX: touchState.startX, fromY: touchState.startY, x: pos.x, y: pos.y });
+    showClickIndicator(pos.x, pos.y);
+    navigator.vibrate?.(15);
+    touchState.dragging = false; touchState.maybeDrag = false; lastTap = 0;
+    return;
+  }
   if (touchState.moved) { send({ type: 'mouse_move', x: pos.x, y: pos.y }); lastTap = 0; return; }
   if (elapsed >= 500) return;  // long press already fired a right click
 
@@ -188,16 +293,30 @@ els.screenContainer.addEventListener('touchend', (e) => {
   navigator.vibrate?.(10);
 });
 
-let lastScrollY = 0;
-els.screenContainer.addEventListener('touchmove', (e) => {
-  if (e.touches.length === 2 && state.connected) {
-    e.preventDefault();
-    const y = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    if (lastScrollY !== 0) { const delta = Math.round((lastScrollY - y) / 15); if (Math.abs(delta) > 0) { const pos = getRelativePos(e); send({ type: 'scroll', x: pos.x, y: pos.y, delta }); } }
-    lastScrollY = y;
+// Zoom badge: shows the current factor, tap to reset. Events must not bubble
+// into the screen container or the reset tap would also click the remote PC.
+['touchstart', 'touchmove', 'touchend'].forEach(ev =>
+  els.zoomBadge.addEventListener(ev, (e) => e.stopPropagation()));
+els.zoomBadge.addEventListener('click', (e) => {
+  e.stopPropagation();
+  state.view.zoom = 1; applyView();
+});
+
+// ===== Fullscreen / landscape =====
+async function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    try { screen.orientation.unlock(); } catch (e) { /* not locked / unsupported */ }
+    try { await document.exitFullscreen(); } catch (e) {}
+    return;
   }
-}, { passive: false });
-els.screenContainer.addEventListener('touchend', () => { lastScrollY = 0; });
+  try { await document.documentElement.requestFullscreen(); }
+  catch (e) { showToast('Fullscreen not available: ' + e.message, '#ef4444'); return; }
+  try { await screen.orientation.lock('landscape'); }
+  catch (e) { showToast('Rotate your phone for landscape'); }
+}
+els.fullscreenBtn.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', () =>
+  els.fullscreenBtn.classList.toggle('active', !!document.fullscreenElement));
 
 // ===== Panels =====
 function openPanel(name) {
@@ -336,6 +455,8 @@ const quickActions = {
   'open-terminal': () => apiPost('/api/execute', { command: 'start wt' }),
   'copy': () => send({ type: 'hotkey', keys: ['ctrl', 'c'] }),
   'paste': () => send({ type: 'hotkey', keys: ['ctrl', 'v'] }),
+  // Task View stays open after the hotkey, so a follow-up tap picks the window.
+  'task-view': () => send({ type: 'hotkey', keys: ['win', 'tab'] }),
   'task-manager': () => send({ type: 'hotkey', keys: ['ctrl', 'shift', 'esc'] }),
   'desktop': () => send({ type: 'hotkey', keys: ['win', 'd'] }),
   'lock': () => send({ type: 'hotkey', keys: ['win', 'l'] }),
