@@ -1,10 +1,11 @@
 @echo off
+cd /d "%~dp0"
+
 echo ==========================================
 echo   PC Remote Controller - Setup
 echo ==========================================
 echo.
 
-REM Check if Python is installed
 python --version >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python is not installed!
@@ -20,9 +21,19 @@ echo [OK] Python found
 python --version
 echo.
 
-REM Install dependencies
+if not exist ".venv\Scripts\python.exe" (
+    echo Creating virtual environment...
+    python -m venv .venv
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment.
+        pause
+        exit /b 1
+    )
+)
+
 echo Installing dependencies...
-pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 if errorlevel 1 (
     echo [ERROR] Failed to install dependencies.

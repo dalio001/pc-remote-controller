@@ -4,13 +4,14 @@ import base64
 import logging
 import os
 import platform
+import secrets
 import sys
 import time
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocketState
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,39 +58,25 @@ app.add_middleware(
 lifespan.capture = ScreenCapture(scale_factor=SCALE_FACTOR, quality=JPEG_QUALITY)
 lifespan.input = InputController()
 lifespan.ai = AIController(api_key=CLAUDE_API_KEY, model=CLAUDE_MODEL)
-
-# Static files (React frontend build output)
-if os.path.isdir(STATIC_DIR):
-    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
-else:
-    os.makedirs(STATIC_DIR, exist_ok=True)
+lifespan.fps = FRAME_RATE
 
 
-# ===== SPA Fallback - serve index.html for all routes =====
-@app.get("/")
-async def serve_index():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return JSONResponse({"status": "PC Remote Controller API is running"})
+def password_ok(provided: str) -> bool:
+    """Constant-time password check. No password configured means auth is off."""
+    if not AUTH_PASSWORD:
+        return True
+    return secrets.compare_digest(provided or "", AUTH_PASSWORD)
 
 
-@app.get("/{path:path}")
-async def serve_spa(path: str):
-    """Serve index.html for SPA routing (except API paths)."""
-    if path.startswith("api/") or path == "ws":
-        return JSONResponse({"error": "Not found"}, status_code=404)
-    file_path = os.path.join(STATIC_DIR, path)
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        return FileResponse(file_path)
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return JSONResponse({"error": "Not found"}, status_code=404)
+def require_auth(x_auth_password: str = Header(default="")):
+    if not password_ok(x_auth_password):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 
 # ===== API Endpoints =====
-@app.post("/api/screenshot")
+@app.post("/api/screenshot", dependencies=[Depends(require_auth)])
 async def take_screenshot():
     """Take a single full-resolution screenshot."""
     try:
@@ -103,13 +90,17 @@ async def take_screenshot():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.post("/api/ai/command")
+@app.post("/api/ai/command", dependencies=[Depends(require_auth)])
 async def ai_command(request: dict):
     """Process a natural language command via Claude AI."""
     try:
         command = request.get("command", "")
         if not command:
             return JSONResponse({"error": "No command provided"}, status_code=400)
+
+        api_key = request.get("api_key", "")
+        if api_key:
+            lifespan.ai.api_key = api_key
 
         result = lifespan.ai.process_command(command)
         return result
@@ -118,7 +109,7 @@ async def ai_command(request: dict):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/system/info")
+@app.get("/api/system/info", dependencies=[Depends(require_auth)])
 async def system_info():
     """Get system information."""
     try:
@@ -134,7 +125,7 @@ async def system_info():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.post("/api/open")
+@app.post("/api/open", dependencies=[Depends(require_auth)])
 async def open_url(request: dict):
     """Open a URL in the default browser."""
     try:
@@ -147,7 +138,7 @@ async def open_url(request: dict):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.post("/api/execute")
+@app.post("/api/execute", dependencies=[Depends(require_auth)])
 async def execute_command(request: dict):
     """Execute a system command or open an application."""
     try:
@@ -160,17 +151,58 @@ async def execute_command(request: dict):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# ===== Static files / SPA fallback =====
+# Registered last on purpose: the catch-all below uses a `path` converter, which
+# matches slashes and would otherwise shadow every GET /api/* route.
+def static_file(path: str) -> FileResponse:
+    """Serve a static file, telling the browser to revalidate rather than reuse.
+
+    Phones aggressively heuristic-cache JS with no Cache-Control, which makes
+    frontend edits look like they did nothing. "no-cache" still caches - it just
+    forces an ETag check, which is a cheap 304 over a LAN.
+    """
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/")
+async def serve_index():
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return static_file(index_path)
+    return JSONResponse({"status": "PC Remote Controller API is running"})
+
+
+@app.get("/{path:path}")
+async def serve_spa(path: str):
+    """Serve index.html for SPA routing (except API paths)."""
+    if path.startswith("api/") or path == "ws":
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    static_root = os.path.realpath(STATIC_DIR)
+    file_path = os.path.realpath(os.path.join(static_root, path))
+    try:
+        contained = os.path.commonpath([static_root, file_path]) == static_root
+    except ValueError:
+        # Different drives (e.g. a "/C:/Windows/..." request) - never contained.
+        contained = False
+    if contained and os.path.isfile(file_path):
+        return static_file(file_path)
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return static_file(index_path)
+    return JSONResponse({"error": "Not found"}, status_code=404)
+
+
 # ===== WebSocket =====
 async def stream_screen(websocket: WebSocket):
     """Background task: capture screen and send frames."""
-    frame_delay = 1.0 / FRAME_RATE
     logger.info("Screen streaming started")
 
     try:
         while True:
-            if websocket.client_state.DISCONNECTED:
+            if websocket.client_state != WebSocketState.CONNECTED:
                 break
 
+            frame_delay = 1.0 / max(1, lifespan.fps)
             jpeg_bytes, (w, h) = lifespan.capture.get_frame()
             if jpeg_bytes:
                 b64 = base64.b64encode(jpeg_bytes).decode("utf-8")
@@ -216,7 +248,8 @@ async def handle_control(websocket: WebSocket):
                     lifespan.capture.quality = max(10, min(100, quality))
                 if scale is not None:
                     lifespan.capture.scale_factor = max(0.25, min(1.0, scale))
-                # FPS is handled by frame_delay in stream_screen
+                if fps is not None:
+                    lifespan.fps = max(1, min(60, fps))
                 continue
 
             if msg_type == "mouse_move":
@@ -260,6 +293,20 @@ async def handle_control(websocket: WebSocket):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+
+    if AUTH_PASSWORD:
+        try:
+            first = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+        except Exception:
+            await websocket.close(code=1008)
+            return
+        if first.get("type") != "auth" or not password_ok(first.get("password", "")):
+            logger.warning(f"Rejected unauthenticated client: {websocket.client}")
+            await websocket.send_json({"type": "auth_failed"})
+            await websocket.close(code=1008)
+            return
+        await websocket.send_json({"type": "auth_ok"})
+
     logger.info(f"Client connected: {websocket.client}")
 
     # Start screen stream and control handler concurrently
@@ -285,7 +332,11 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
     finally:
         logger.info("Client disconnected")
-        await websocket.close()
+        if websocket.client_state == WebSocketState.CONNECTED:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
 
 
 # ===== Entry Point =====

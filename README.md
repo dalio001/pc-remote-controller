@@ -74,7 +74,14 @@ http://192.168.1.100:8080
 1. Make sure your phone is on the **same WiFi** as your PC
 2. Open your phone's browser (Chrome, Safari, etc.)
 3. Type the URL shown (e.g., `http://192.168.1.100:8080`)
-4. You should see your PC screen!
+4. Tap the **gear icon (Settings)**, enter the password from your `.env`
+   file (`AUTH_PASSWORD=...`), and tap **Save**
+5. You should see your PC screen!
+
+The password is required — without it the server refuses the connection and
+the screen stays blank. To change it, edit `AUTH_PASSWORD` in `.env` and
+restart the server. Leaving it empty disables authentication entirely, which
+means anyone on your WiFi gets full control of your PC.
 
 ---
 
@@ -158,8 +165,9 @@ chmod +x setup.sh run.sh
 ## Security Notes
 
 - This tool runs on your **local network only** - it's not exposed to the internet
-- Anyone on your WiFi can access it while it's running
-- You can set a password in Settings for basic protection
+- Access requires the password set as `AUTH_PASSWORD` in `.env`
+- Traffic is plain HTTP, so the password and your screen are unencrypted on
+  the local network - fine for a home WiFi you trust, not for public WiFi
 - Stop the server (close the window) when not in use
 - Keep your Claude API key private - don't share it
 

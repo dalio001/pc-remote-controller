@@ -8,9 +8,14 @@ const state = {
   ws: null, connected: false, connecting: false,
   frameUrl: null, screenWidth: 1920, screenHeight: 1080,
   shift: false, fnMode: false, activePanel: null,
-  reconnectTimer: null, reconnectAttempts: 0,
-  pingInterval: null, settings: {
-    quality: 70, fps: 20, scale: 0.5,
+  reconnectTimer: null, reconnectAttempts: 0, authFailed: false,
+  pingInterval: null,
+  lastClickTimer: null,
+  modifiers: { ctrl: false, alt: false },
+  settings: {
+    quality: +localStorage.getItem('quality') || 70,
+    fps: +localStorage.getItem('fps') || 20,
+    scale: +localStorage.getItem('scale') || 0.5,
     apiKey: localStorage.getItem('apiKey') || '',
     password: localStorage.getItem('password') || '',
   }
@@ -42,12 +47,16 @@ function connect() {
   state.ws.onopen = () => {
     state.connected = true; state.connecting = false; state.reconnectAttempts = 0;
     updateStatus('connected'); els.overlay.classList.add('hidden'); els.screenImg.classList.add('active');
+    state.ws.send(JSON.stringify({ type: 'auth', password: state.settings.password }));
     startPing(); sendSettings();
   };
   state.ws.onmessage = (e) => {
     if (typeof e.data === 'string') {
-      try { const msg = JSON.parse(e.data); if (msg.type === 'frame') handleFrame(msg); }
-      catch (err) {}
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'frame') handleFrame(msg);
+        else if (msg.type === 'auth_failed') state.authFailed = true;
+      } catch (err) {}
     }
   };
   state.ws.onerror = () => { state.connecting = false; };
@@ -57,9 +66,12 @@ function connect() {
 function onDisconnect() {
   state.connected = false; state.connecting = false;
   updateStatus('error');
-  els.overlay.textContent = 'Disconnected. Tap to reconnect.';
+  els.overlay.textContent = state.authFailed
+    ? 'Wrong password. Open Settings (gear icon) to enter it.'
+    : 'Disconnected. Tap to reconnect.';
   els.overlay.classList.remove('hidden'); els.screenImg.classList.remove('active');
-  stopPing(); scheduleReconnect();
+  stopPing();
+  if (!state.authFailed) scheduleReconnect();
 }
 
 function scheduleReconnect() {
@@ -111,9 +123,14 @@ function getRelativePos(e) {
 }
 
 function showClickIndicator(x, y) {
+  // x/y are normalized against the IMAGE, but the indicator is positioned inside
+  // the CONTAINER. The image is object-fit: contain and centred, so it is
+  // letterboxed whenever the PC and phone aspect ratios differ - without the
+  // offset the ripple drifts away from the fingertip.
   const rect = els.screenContainer.getBoundingClientRect();
-  els.clickIndicator.style.left = (x * rect.width) + 'px';
-  els.clickIndicator.style.top = (y * rect.height) + 'px';
+  const img = els.screenImg.getBoundingClientRect();
+  els.clickIndicator.style.left = (img.left - rect.left + x * img.width) + 'px';
+  els.clickIndicator.style.top = (img.top - rect.top + y * img.height) + 'px';
   els.clickIndicator.classList.remove('show');
   void els.clickIndicator.offsetWidth;
   els.clickIndicator.classList.add('show');
@@ -144,13 +161,31 @@ els.screenContainer.addEventListener('touchmove', (e) => {
   if (touchState.moved && Date.now() - touchState.startTime > 100) send({ type: 'mouse_move', x: pos.x, y: pos.y });
 }, { passive: false });
 
+// Single tap vs double tap is decided in ONE handler. Splitting it across two
+// independent touchend listeners meant a double tap emitted click + click +
+// double_click - four physical button events - which opened things twice.
+let lastTap = 0;
 els.screenContainer.addEventListener('touchend', (e) => {
   if (!state.connected) return;
   clearTimeout(touchState.longPressTimer);
   const elapsed = Date.now() - touchState.startTime;
   const pos = getRelativePos(e.changedTouches[0] ? { touches: [e.changedTouches[0]] } : e);
-  if (!touchState.moved && elapsed < 500) { send({ type: 'mouse_click', x: pos.x, y: pos.y }); showClickIndicator(pos.x, pos.y); navigator.vibrate?.(10); }
-  else if (touchState.moved) send({ type: 'mouse_move', x: pos.x, y: pos.y });
+  if (touchState.moved) { send({ type: 'mouse_move', x: pos.x, y: pos.y }); lastTap = 0; return; }
+  if (elapsed >= 500) return;  // long press already fired a right click
+
+  const now = Date.now();
+  if (now - lastTap < 300) {
+    // Second tap of a double: send only the double click. The first tap's click
+    // already landed, which is exactly the select-then-open sequence a real
+    // mouse produces.
+    send({ type: 'mouse_double_click', x: pos.x, y: pos.y });
+    lastTap = 0;
+  } else {
+    send({ type: 'mouse_click', x: pos.x, y: pos.y });
+    lastTap = now;
+  }
+  showClickIndicator(pos.x, pos.y);
+  navigator.vibrate?.(10);
 });
 
 let lastScrollY = 0;
@@ -164,18 +199,11 @@ els.screenContainer.addEventListener('touchmove', (e) => {
 }, { passive: false });
 els.screenContainer.addEventListener('touchend', () => { lastScrollY = 0; });
 
-let lastTap = 0;
-els.screenContainer.addEventListener('touchend', (e) => {
-  const now = Date.now();
-  if (now - lastTap < 300) { const pos = getRelativePos(e.changedTouches[0] ? { touches: [e.changedTouches[0]] } : e); send({ type: 'mouse_double_click', x: pos.x, y: pos.y }); showClickIndicator(pos.x, pos.y); }
-  lastTap = now;
-});
-
 // ===== Panels =====
 function openPanel(name) {
   if (state.activePanel === name) { closeAllPanels(); return; }
   closeAllPanels(); state.activePanel = name;
-  const panel = els[name + 'Panel']; if (panel) panel.classList.add('open');
+  const panel = els[name]; if (panel) panel.classList.add('open');
   document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
   const btnMap = { navPanel: 'btnNav', keyboardPanel: 'btnKeyboard', aiPanel: 'btnAI' };
   const btnId = btnMap[name]; if (btnId) $(btnId)?.classList.add('active');
@@ -186,7 +214,9 @@ function closeAllPanels() {
   document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
 }
 
-$('btnMouse').addEventListener('click', () => closeAllPanels());
+// Mouse is the default mode, so closeAllPanels() alone left it as the only
+// control with no selected indicator.
+$('btnMouse').addEventListener('click', () => { closeAllPanels(); $('btnMouse').classList.add('active'); });
 $('btnKeyboard').addEventListener('click', () => openPanel('keyboardPanel'));
 $('btnAI').addEventListener('click', () => openPanel('aiPanel'));
 $('btnScreenshot').addEventListener('click', takeScreenshot);
@@ -215,13 +245,41 @@ document.querySelectorAll('.action-btn[data-key]').forEach(btn => {
 // ===== Keyboard =====
 const fnKeys = { q: 'f1', w: 'f2', e: 'f3', r: 'f4', t: 'f5', y: 'f6', u: 'f7', i: 'f8', o: 'f9', p: 'f10', a: 'f11', s: 'f12' };
 
+// Ctrl and Alt latch instead of firing a bare press-and-release. Tapping them
+// alone previously did nothing observable, so Ctrl then C typed a plain "c"
+// rather than copying.
+function activeModifiers() {
+  const mods = [];
+  if (state.modifiers.ctrl) mods.push('ctrl');
+  if (state.modifiers.alt) mods.push('alt');
+  return mods;
+}
+function clearModifiers() {
+  state.modifiers.ctrl = false; state.modifiers.alt = false;
+  // Selected by data-action: these two buttons carry no id in index.html.
+  document.querySelectorAll('.k[data-action="ctrl"], .k[data-action="alt"]')
+    .forEach(b => b.classList.remove('active'));
+}
+function toggleModifier(name, btn) {
+  state.modifiers[name] = !state.modifiers[name];
+  btn.classList.toggle('active', state.modifiers[name]);
+}
+
+// Route a key through any latched modifiers, consuming them.
+function sendKey(key) {
+  const mods = activeModifiers();
+  if (mods.length) { send({ type: 'hotkey', keys: [...mods, key] }); clearModifiers(); }
+  else send({ type: 'key_press', key });
+}
+
 document.querySelectorAll('.k[data-k]').forEach(btn => {
   btn.addEventListener('click', () => {
     let key = btn.dataset.k;
-    if (state.fnMode && fnKeys[key]) { key = fnKeys[key]; send({ type: 'key_press', key }); return; }
+    if (state.fnMode && fnKeys[key]) { sendKey(fnKeys[key]); return; }
+    if (key === ' ') { sendKey('space'); toggleShift(false); return; }
+    if (activeModifiers().length) { sendKey(key); toggleShift(false); return; }
     if (state.shift) { const upper = key.toUpperCase(); if (upper !== key) { send({ type: 'type_text', text: upper }); toggleShift(false); return; } }
-    if (key === ' ') send({ type: 'key_press', key: 'space' });
-    else send({ type: 'type_text', text: key });
+    send({ type: 'type_text', text: key });
   });
 });
 
@@ -230,10 +288,10 @@ document.querySelectorAll('.k[data-action]').forEach(btn => {
     const action = btn.dataset.action;
     if (action === 'shift') toggleShift();
     else if (action === 'fn') toggleFn();
-    else if (action === 'backspace') send({ type: 'key_press', key: 'backspace' });
-    else if (action === 'enter') send({ type: 'key_press', key: 'enter' });
-    else if (action === 'ctrl') send({ type: 'key_press', key: 'ctrl' });
-    else if (action === 'alt') send({ type: 'key_press', key: 'alt' });
+    else if (action === 'ctrl') toggleModifier('ctrl', btn);
+    else if (action === 'alt') toggleModifier('alt', btn);
+    else if (action === 'backspace') sendKey('backspace');
+    else if (action === 'enter') sendKey('enter');
   });
 });
 
@@ -260,8 +318,9 @@ async function sendAICommand() {
   const cmd = els.aiInput.value.trim(); if (!cmd) return;
   addMessage(cmd, 'user'); els.aiInput.value = ''; els.aiSendBtn.classList.add('loading');
   try {
-    const resp = await fetch('/api/ai/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmd }) });
-    const data = await resp.json(); addMessage(data.response || data.error || 'No response', 'ai');
+    const resp = await fetch('/api/ai/command', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ command: cmd, api_key: state.settings.apiKey }) });
+    if (!resp.ok) { addMessage(await errorText(resp), 'ai'); }
+    else { const data = await resp.json(); addMessage(data.response || data.error || 'No response', 'ai'); }
   } catch (e) { addMessage('Error: ' + e.message, 'ai'); }
   els.aiSendBtn.classList.remove('loading');
 }
@@ -272,7 +331,9 @@ els.aiInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendAICo
 const quickActions = {
   'open-browser': () => apiPost('/api/open', { url: 'https://google.com' }),
   'open-files': () => send({ type: 'hotkey', keys: ['win', 'e'] }),
-  'open-terminal': () => send({ type: 'hotkey', keys: ['ctrl', 'alt', 't'] }),
+  // ctrl+alt+t is a GNOME shortcut and a no-op on Windows. "start" detaches the
+  // window so it survives independently of the server process.
+  'open-terminal': () => apiPost('/api/execute', { command: 'start wt' }),
   'copy': () => send({ type: 'hotkey', keys: ['ctrl', 'c'] }),
   'paste': () => send({ type: 'hotkey', keys: ['ctrl', 'v'] }),
   'task-manager': () => send({ type: 'hotkey', keys: ['ctrl', 'shift', 'esc'] }),
@@ -287,11 +348,36 @@ document.querySelectorAll('.qa-btn[data-action]').forEach(btn => {
   });
 });
 
-async function apiPost(url, body) { try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {} }
+function authHeaders(extra) { return Object.assign({ 'X-Auth-Password': state.settings.password }, extra || {}); }
+
+// Turn a failed response into readable text. A 401 here almost always means the
+// password in Settings is wrong, which is worth saying outright.
+async function errorText(resp) {
+  if (resp.status === 401) return 'Wrong password - check Settings';
+  let detail = '';
+  try { const data = await resp.json(); detail = data.detail || data.error || ''; } catch (e) {}
+  return detail || `Request failed (${resp.status})`;
+}
+
+async function apiPost(url, body) {
+  try {
+    const resp = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+    if (!resp.ok) { showToast(await errorText(resp), '#ef4444'); return null; }
+    return resp;
+  } catch (e) { showToast('Network error: ' + e.message, '#ef4444'); return null; }
+}
+
 async function takeScreenshot() {
-  try { const resp = await fetch('/api/screenshot', { method: 'POST' }); const data = await resp.json();
-    if (data.image) { const a = document.createElement('a'); a.href = 'data:image/jpeg;base64,' + data.image; a.download = 'screenshot_' + Date.now() + '.jpg'; a.click(); }
-  } catch (e) { console.error(e); }
+  try {
+    const resp = await fetch('/api/screenshot', { method: 'POST', headers: authHeaders() });
+    if (!resp.ok) { showToast(await errorText(resp), '#ef4444'); return; }
+    const data = await resp.json();
+    if (!data.image) { showToast(data.error || 'Capture failed', '#ef4444'); return; }
+    const a = document.createElement('a');
+    a.href = 'data:image/jpeg;base64,' + data.image;
+    a.download = 'screenshot_' + Date.now() + '.jpg';
+    a.click();
+  } catch (e) { showToast('Network error: ' + e.message, '#ef4444'); }
 }
 
 // ===== Settings =====
@@ -303,21 +389,45 @@ els.scaleRange.value = state.settings.scale * 100; els.scaleValue.textContent = 
 els.scaleRange.addEventListener('input', (e) => { state.settings.scale = +e.target.value / 100; els.scaleValue.textContent = e.target.value + '%'; });
 els.apiKeyInput.value = state.settings.apiKey; els.passwordInput.value = state.settings.password;
 
+function showToast(text, color) {
+  const el = document.createElement('div'); el.textContent = text;
+  el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:' + (color || '#22c55e') +
+    ';color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:9999;max-width:80vw;text-align:center;animation:fadeInOut 1.5s forwards;';
+  document.body.appendChild(el); setTimeout(() => el.remove(), 1500);
+}
+
+// Persist every setting, not just the credentials - the sliders used to silently
+// revert to their defaults on reload while the "Saved!" toast claimed otherwise.
+function persistSettings() {
+  localStorage.setItem('apiKey', state.settings.apiKey);
+  localStorage.setItem('password', state.settings.password);
+  localStorage.setItem('quality', state.settings.quality);
+  localStorage.setItem('fps', state.settings.fps);
+  localStorage.setItem('scale', state.settings.scale);
+}
+
 $('saveSettings').addEventListener('click', () => {
   state.settings.quality = +els.qualityRange.value; state.settings.fps = +els.fpsRange.value;
   state.settings.scale = +els.scaleRange.value / 100; state.settings.apiKey = els.apiKeyInput.value;
   state.settings.password = els.passwordInput.value;
-  localStorage.setItem('apiKey', state.settings.apiKey); localStorage.setItem('password', state.settings.password);
+  persistSettings();
   sendSettings(); closeAllPanels();
-  const saved = document.createElement('div'); saved.textContent = 'Saved!';
-  saved.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#22c55e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:9999;animation:fadeInOut 1.5s forwards;';
-  document.body.appendChild(saved); setTimeout(() => saved.remove(), 1500);
+  if (state.authFailed || !state.connected) { state.authFailed = false; state.reconnectAttempts = 0; state.ws?.close(); connect(); }
+  showToast('Saved!');
 });
+
+// Reset used to only repaint the inputs, leaving the live stream and the stored
+// values untouched until the user separately pressed Save. It now applies
+// immediately, but deliberately leaves the password and API key alone: clearing
+// the password would drop the connection and lock the user out of the very panel
+// they would need to get back in.
 $('resetSettings').addEventListener('click', () => {
   els.qualityRange.value = 70; els.qualityValue.textContent = '70';
   els.fpsRange.value = 20; els.fpsValue.textContent = '20';
   els.scaleRange.value = 50; els.scaleValue.textContent = '50%';
-  els.apiKeyInput.value = ''; els.passwordInput.value = '';
+  state.settings.quality = 70; state.settings.fps = 20; state.settings.scale = 0.5;
+  persistSettings(); sendSettings();
+  showToast('Stream settings reset');
 });
 const style = document.createElement('style');
 style.textContent = '@keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%)scale(.8)}20%{opacity:1;transform:translate(-50%,-50%)scale(1)}80%{opacity:1}100%{opacity:0}}';

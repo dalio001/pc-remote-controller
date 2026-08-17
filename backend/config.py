@@ -16,7 +16,7 @@ SCALE_FACTOR = float(os.getenv("SCALE_FACTOR", "0.5"))  # 0.25-1.0
 # AI
 ENABLE_AI = os.getenv("ENABLE_AI", "true").lower() == "true"
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-haiku-20240307")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
 
 # Security
 AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")
