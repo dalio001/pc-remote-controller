@@ -8,7 +8,7 @@ const state = {
   ws: null, connected: false, connecting: false,
   frameUrl: null, screenWidth: 1920, screenHeight: 1080,
   shift: false, fnMode: false, activePanel: null,
-  reconnectTimer: null, reconnectAttempts: 0,
+  reconnectTimer: null, reconnectAttempts: 0, authFailed: false,
   pingInterval: null, settings: {
     quality: 70, fps: 20, scale: 0.5,
     apiKey: localStorage.getItem('apiKey') || '',
@@ -42,12 +42,16 @@ function connect() {
   state.ws.onopen = () => {
     state.connected = true; state.connecting = false; state.reconnectAttempts = 0;
     updateStatus('connected'); els.overlay.classList.add('hidden'); els.screenImg.classList.add('active');
+    state.ws.send(JSON.stringify({ type: 'auth', password: state.settings.password }));
     startPing(); sendSettings();
   };
   state.ws.onmessage = (e) => {
     if (typeof e.data === 'string') {
-      try { const msg = JSON.parse(e.data); if (msg.type === 'frame') handleFrame(msg); }
-      catch (err) {}
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'frame') handleFrame(msg);
+        else if (msg.type === 'auth_failed') state.authFailed = true;
+      } catch (err) {}
     }
   };
   state.ws.onerror = () => { state.connecting = false; };
@@ -57,9 +61,12 @@ function connect() {
 function onDisconnect() {
   state.connected = false; state.connecting = false;
   updateStatus('error');
-  els.overlay.textContent = 'Disconnected. Tap to reconnect.';
+  els.overlay.textContent = state.authFailed
+    ? 'Wrong password. Open Settings (gear icon) to enter it.'
+    : 'Disconnected. Tap to reconnect.';
   els.overlay.classList.remove('hidden'); els.screenImg.classList.remove('active');
-  stopPing(); scheduleReconnect();
+  stopPing();
+  if (!state.authFailed) scheduleReconnect();
 }
 
 function scheduleReconnect() {
@@ -260,7 +267,7 @@ async function sendAICommand() {
   const cmd = els.aiInput.value.trim(); if (!cmd) return;
   addMessage(cmd, 'user'); els.aiInput.value = ''; els.aiSendBtn.classList.add('loading');
   try {
-    const resp = await fetch('/api/ai/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmd }) });
+    const resp = await fetch('/api/ai/command', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ command: cmd, api_key: state.settings.apiKey }) });
     const data = await resp.json(); addMessage(data.response || data.error || 'No response', 'ai');
   } catch (e) { addMessage('Error: ' + e.message, 'ai'); }
   els.aiSendBtn.classList.remove('loading');
@@ -287,9 +294,10 @@ document.querySelectorAll('.qa-btn[data-action]').forEach(btn => {
   });
 });
 
-async function apiPost(url, body) { try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {} }
+function authHeaders(extra) { return Object.assign({ 'X-Auth-Password': state.settings.password }, extra || {}); }
+async function apiPost(url, body) { try { await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) }); } catch (e) {} }
 async function takeScreenshot() {
-  try { const resp = await fetch('/api/screenshot', { method: 'POST' }); const data = await resp.json();
+  try { const resp = await fetch('/api/screenshot', { method: 'POST', headers: authHeaders() }); const data = await resp.json();
     if (data.image) { const a = document.createElement('a'); a.href = 'data:image/jpeg;base64,' + data.image; a.download = 'screenshot_' + Date.now() + '.jpg'; a.click(); }
   } catch (e) { console.error(e); }
 }
@@ -309,6 +317,7 @@ $('saveSettings').addEventListener('click', () => {
   state.settings.password = els.passwordInput.value;
   localStorage.setItem('apiKey', state.settings.apiKey); localStorage.setItem('password', state.settings.password);
   sendSettings(); closeAllPanels();
+  if (state.authFailed || !state.connected) { state.authFailed = false; state.reconnectAttempts = 0; state.ws?.close(); connect(); }
   const saved = document.createElement('div'); saved.textContent = 'Saved!';
   saved.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#22c55e;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:9999;animation:fadeInOut 1.5s forwards;';
   document.body.appendChild(saved); setTimeout(() => saved.remove(), 1500);
