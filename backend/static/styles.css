@@ -85,7 +85,9 @@ input { font-family: inherit; }
 .k { min-width: 30px; height: 42px; padding: 0 8px; border-radius: 8px; background: #334155; border: 1px solid #475569; color: #e2e8f0; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; transition: all .08s; flex: 1; max-width: 42px; }
 .k:active { background: #0ea5e9; border-color: #0ea5e9; transform: scale(.92); }
 .k-shift { max-width: 44px; color: #94a3b8; }
-.k-shift.active { background: #0ea5e9; color: #fff; }
+/* Covers every latching key - Shift, Fn, Ctrl and Alt. Previously only
+   .k-shift.active existed, so Fn/Ctrl/Alt gave no feedback when engaged. */
+.k.active { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
 .k-wide { max-width: 56px; font-size: 11px; }
 .k-space { max-width: none; flex: 3; }
 .k-fn { max-width: 36px; font-size: 10px; color: #94a3b8; }

@@ -75,30 +75,6 @@ def require_auth(x_auth_password: str = Header(default="")):
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 
-# ===== SPA Fallback - serve index.html for all routes =====
-@app.get("/")
-async def serve_index():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return JSONResponse({"status": "PC Remote Controller API is running"})
-
-
-@app.get("/{path:path}")
-async def serve_spa(path: str):
-    """Serve index.html for SPA routing (except API paths)."""
-    if path.startswith("api/") or path == "ws":
-        return JSONResponse({"error": "Not found"}, status_code=404)
-    static_root = os.path.realpath(STATIC_DIR)
-    file_path = os.path.realpath(os.path.join(static_root, path))
-    if os.path.commonpath([static_root, file_path]) == static_root and os.path.isfile(file_path):
-        return FileResponse(file_path)
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return JSONResponse({"error": "Not found"}, status_code=404)
-
-
 # ===== API Endpoints =====
 @app.post("/api/screenshot", dependencies=[Depends(require_auth)])
 async def take_screenshot():
@@ -133,7 +109,7 @@ async def ai_command(request: dict):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/system/info")
+@app.get("/api/system/info", dependencies=[Depends(require_auth)])
 async def system_info():
     """Get system information."""
     try:
@@ -173,6 +149,47 @@ async def execute_command(request: dict):
         return JSONResponse({"error": "No command provided"}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ===== Static files / SPA fallback =====
+# Registered last on purpose: the catch-all below uses a `path` converter, which
+# matches slashes and would otherwise shadow every GET /api/* route.
+def static_file(path: str) -> FileResponse:
+    """Serve a static file, telling the browser to revalidate rather than reuse.
+
+    Phones aggressively heuristic-cache JS with no Cache-Control, which makes
+    frontend edits look like they did nothing. "no-cache" still caches - it just
+    forces an ETag check, which is a cheap 304 over a LAN.
+    """
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/")
+async def serve_index():
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return static_file(index_path)
+    return JSONResponse({"status": "PC Remote Controller API is running"})
+
+
+@app.get("/{path:path}")
+async def serve_spa(path: str):
+    """Serve index.html for SPA routing (except API paths)."""
+    if path.startswith("api/") or path == "ws":
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    static_root = os.path.realpath(STATIC_DIR)
+    file_path = os.path.realpath(os.path.join(static_root, path))
+    try:
+        contained = os.path.commonpath([static_root, file_path]) == static_root
+    except ValueError:
+        # Different drives (e.g. a "/C:/Windows/..." request) - never contained.
+        contained = False
+    if contained and os.path.isfile(file_path):
+        return static_file(file_path)
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return static_file(index_path)
+    return JSONResponse({"error": "Not found"}, status_code=404)
 
 
 # ===== WebSocket =====
