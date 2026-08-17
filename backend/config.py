@@ -27,6 +27,12 @@ AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")
 ENABLE_TUNNEL = os.getenv("ENABLE_TUNNEL", "false").lower() == "true"
 NGROK_AUTHTOKEN = os.getenv("NGROK_AUTHTOKEN", "")
 NGROK_DOMAIN = os.getenv("NGROK_DOMAIN", "")
+# Traffic policy applied at the ngrok edge (e.g. Google sign-in) BEFORE requests
+# reach this app. Missing file = no edge auth, password only.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+NGROK_POLICY_FILE = os.getenv(
+    "NGROK_POLICY_FILE", os.path.join(_PROJECT_ROOT, "ngrok-policy.yml")
+)
 # Minimum password length accepted when the tunnel is on.
 MIN_PUBLIC_PASSWORD_LEN = 12
 

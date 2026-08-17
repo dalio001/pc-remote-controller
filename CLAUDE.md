@@ -60,6 +60,10 @@ Win latches, a bare Win press lives in the `start-menu` quick action instead.
    Rules here are port-based on purpose — the venv `python.exe` resolves to the base interpreter,
    so program-path rules are unreliable.
 3. **ngrok tunnel** (`ENABLE_TUNNEL=true`) — a stable public https URL, no app on the phone.
+   Guarded at the edge by `ngrok-policy.yml` (gitignored; see `ngrok-policy.example.yml`), which
+   requires Google sign-in as a specific address — anonymous visitors get a 302 to Google and
+   never reach the app, even holding the right password. Confirmed working on the free plan.
+   The policy applies to ngrok traffic only, so LAN and Tailscale are unaffected.
    `backend/tunnel.py` spawns ngrok and reads the URL back from its local API at
    `127.0.0.1:4040`. Outbound only, so no inbound firewall rule. Free `ngrok-free.app` domains
    show a one-time browser interstitial; it affects top-level navigation only, not `/ws`.

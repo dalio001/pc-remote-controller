@@ -9,6 +9,7 @@ look exactly like "the app is broken" from the phone.
 """
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -24,10 +25,11 @@ NGROK_API = "http://127.0.0.1:4040/api/tunnels"
 class Tunnel:
     """Owns the ngrok child process."""
 
-    def __init__(self, port: int, authtoken: str = "", domain: str = ""):
+    def __init__(self, port: int, authtoken: str = "", domain: str = "", policy_file: str = ""):
         self.port = port
         self.authtoken = authtoken
         self.domain = domain
+        self.policy_file = policy_file
         self.proc = None
         self.public_url = ""
 
@@ -65,6 +67,18 @@ class Tunnel:
             cmd += ["--domain", self.domain]
         else:
             logger.warning("NGROK_DOMAIN is empty - the public URL will change on every restart.")
+
+        # Edge auth (e.g. Google sign-in) stops strangers before they reach the app.
+        # Loud about its absence: silently serving the login page to the whole
+        # internet is exactly the situation this is meant to prevent.
+        if self.policy_file and os.path.isfile(self.policy_file):
+            cmd += ["--traffic-policy-file", self.policy_file]
+            logger.info(f"Edge traffic policy: {self.policy_file}")
+        else:
+            logger.warning(
+                "No ngrok traffic policy found - the public URL is protected by the app "
+                "password ALONE. Add ngrok-policy.yml to require sign-in at the edge."
+            )
 
         try:
             self.proc = subprocess.Popen(

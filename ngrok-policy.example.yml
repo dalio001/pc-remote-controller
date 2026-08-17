@@ -1,0 +1,13 @@
+# Copy to ngrok-policy.yml and put your own email in. That file is gitignored.
+#
+# This runs at the ngrok edge, BEFORE a request ever reaches this app: a stranger
+# with the URL is stopped at Google sign-in and never sees the password screen.
+# Only the address below is allowed through.
+#
+# LAN and Tailscale traffic does not pass through ngrok, so it is unaffected.
+on_http_request:
+  - actions:
+      - type: oauth
+        config:
+          provider: google
+          auth_id: you@example.com

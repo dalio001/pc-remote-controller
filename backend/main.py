@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.config import (
     HOST, PORT, FRAME_RATE, JPEG_QUALITY, SCALE_FACTOR,
     ENABLE_AI, CLAUDE_API_KEY, CLAUDE_MODEL, STATIC_DIR, AUTH_PASSWORD,
-    ENABLE_TUNNEL, NGROK_AUTHTOKEN, NGROK_DOMAIN, MIN_PUBLIC_PASSWORD_LEN
+    ENABLE_TUNNEL, NGROK_AUTHTOKEN, NGROK_DOMAIN, NGROK_POLICY_FILE, MIN_PUBLIC_PASSWORD_LEN
 )
 from backend.screen_capture import ScreenCapture
 from backend.input_controller import InputController
@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 
     if ENABLE_TUNNEL:
         logger.warning("Tunnel enabled - this PC will be reachable from the internet.")
-        lifespan.tunnel = Tunnel(PORT, NGROK_AUTHTOKEN, NGROK_DOMAIN)
+        lifespan.tunnel = Tunnel(PORT, NGROK_AUTHTOKEN, NGROK_DOMAIN, NGROK_POLICY_FILE)
         lifespan.tunnel.start()
     else:
         logger.info("Tunnel: Disabled (LAN + Tailscale only)")
@@ -113,8 +113,8 @@ def password_ok(provided: str) -> bool:
 # A public URL means anyone can try passwords as fast as the network allows, so
 # failures cost the caller time. Keyed by client IP: [failure count, locked until].
 FAILED_AUTH = {}
-MAX_ATTEMPTS = 5
-BASE_LOCKOUT = 60      # seconds, after MAX_ATTEMPTS failures
+MAX_ATTEMPTS = 3
+BASE_LOCKOUT = 120     # seconds, after MAX_ATTEMPTS failures
 MAX_LOCKOUT = 15 * 60  # doubling is capped here
 
 
