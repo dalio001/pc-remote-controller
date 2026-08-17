@@ -8,7 +8,7 @@ const state = {
   ws: null, connected: false, connecting: false,
   frameUrl: null, screenWidth: 1920, screenHeight: 1080,
   shift: false, fnMode: false, symMode: false, activePanel: null,
-  reconnectTimer: null, reconnectAttempts: 0, authFailed: false,
+  reconnectTimer: null, reconnectAttempts: 0, authFailed: false, authDetail: '',
   pingInterval: null,
   lastClickTimer: null,
   modifiers: { ctrl: false, alt: false, win: false },
@@ -61,7 +61,12 @@ function connect() {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'frame') handleFrame(msg);
-        else if (msg.type === 'auth_failed') state.authFailed = true;
+        else if (msg.type === 'auth_failed') {
+          state.authFailed = true;
+          // Distinguish a wrong password from a brute-force lockout, rather than
+          // telling the user to re-enter a password that is already correct.
+          state.authDetail = msg.detail || '';
+        }
       } catch (err) {}
     }
   };
@@ -73,7 +78,9 @@ function onDisconnect() {
   state.connected = false; state.connecting = false;
   updateStatus('error');
   els.overlay.textContent = state.authFailed
-    ? 'Wrong password. Open Settings (gear icon) to enter it.'
+    ? (state.authDetail && state.authDetail.startsWith('Too many')
+        ? state.authDetail
+        : 'Wrong password. Open Settings (gear icon) to enter it.')
     : 'Disconnected. Tap to reconnect.';
   els.overlay.classList.remove('hidden'); els.screenImg.classList.remove('active');
   stopPing();
@@ -508,9 +515,10 @@ els.aiInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendAICo
 const quickActions = {
   'open-browser': () => apiPost('/api/open', { url: 'https://google.com' }),
   'open-files': () => send({ type: 'hotkey', keys: ['win', 'e'] }),
-  // ctrl+alt+t is a GNOME shortcut and a no-op on Windows. "start" detaches the
-  // window so it survives independently of the server process.
-  'open-terminal': () => apiPost('/api/execute', { command: 'start wt' }),
+  // ctrl+alt+t is a GNOME shortcut and a no-op on Windows. The server maps this
+  // action key to an allowlisted "start" command - it no longer accepts raw
+  // command strings.
+  'open-terminal': () => apiPost('/api/execute', { action: 'terminal' }),
   'copy': () => send({ type: 'hotkey', keys: ['ctrl', 'c'] }),
   'paste': () => send({ type: 'hotkey', keys: ['ctrl', 'v'] }),
   // Task View stays open after the hotkey, so a follow-up tap picks the window.

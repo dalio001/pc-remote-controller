@@ -49,6 +49,29 @@ modifiers are **ctrl / alt / win**; `shift` joins `activeModifiers()` only when 
 is already latched, so plain Shift+letter keeps the proven `type_text` uppercase path. Because
 Win latches, a bare Win press lives in the `start-menu` quick action instead.
 
+## Reaching the PC (three paths, in order of preference)
+
+1. **Home WiFi** — `http://192.168.1.104:8080`. Nothing extra needed.
+2. **Tailscale** — `http://100.125.169.102:8080`, works anywhere, encrypted, nothing public,
+   but needs the Tailscale app signed in on the phone. Required a firewall rule
+   (`PC Remote Controller 8080 (LAN + Tailscale)`, TCP 8080, `RemoteAddress 100.64.0.0/10,
+   192.168.1.0/24`): the pre-existing Python allow rules were **Public**-profile only, and the
+   Tailscale adapter is **Private**, so tailnet traffic was silently dropped while LAN worked.
+   Rules here are port-based on purpose — the venv `python.exe` resolves to the base interpreter,
+   so program-path rules are unreliable.
+3. **ngrok tunnel** (`ENABLE_TUNNEL=true`) — a stable public https URL, no app on the phone.
+   `backend/tunnel.py` spawns ngrok and reads the URL back from its local API at
+   `127.0.0.1:4040`. Outbound only, so no inbound firewall rule. Free `ngrok-free.app` domains
+   show a one-time browser interstitial; it affects top-level navigation only, not `/ws`.
+
+**Enabling the tunnel makes this PC internet-reachable**, which is why these exist and must not
+be loosened: `check_public_exposure()` aborts startup if the tunnel is on with an empty or
+sub-12-char password (empty `AUTH_PASSWORD` still means auth *off*); `FAILED_AUTH` throttles
+per-IP guessing (5 strikes → 60s, doubling to 15 min) on both the HTTP dependency and the WS
+handshake; and `/api/execute` takes an **action key** resolved through `ALLOWED_COMMANDS`, never
+a raw string — it reaches `Popen(shell=True)`, so free-form input there was RCE behind one
+password.
+
 ## Known issues (ordered by impact)
 
 1. **AI control is a stub.** `ai_integration.py` always returns `"actions": []` — Claude chats about
@@ -58,9 +81,10 @@ Win latches, a bare Win press lives in the `start-menu` quick action instead.
 2. **Multi-monitor mismatch.** Capture uses `mss monitors[0]` (all-monitor union); input scales via
    `pyautogui.size()` (primary). Identical on this single-monitor PC; clicks misalign with 2+ monitors.
 3. **Config is global.** A `config` message mutates process-wide singletons — last client wins.
-4. **Plain HTTP.** Password and screen content cross the LAN unencrypted. Fine on home WiFi; use
-   Tailscale for anything beyond it (PC is `100.125.169.102` on Mohamed's tailnet). Never
-   port-forward this to the internet.
+4. **Plain HTTP on the LAN.** Password and screen content cross the local network unencrypted.
+   Fine on home WiFi. Off-LAN, use Tailscale (PC is `100.125.169.102`) or the ngrok tunnel,
+   which terminates TLS at the edge. **Never port-forward this to the internet** — the tunnel
+   is the supported way out, since it needs no inbound rule at all.
 5. **Drag is one-shot.** Double-tap-hold sends a single `mouse_drag` from→to on release; there is
    no live drag feedback while the finger moves.
 
