@@ -34,6 +34,21 @@ click, double-tap = double click (second single click suppressed), long-press = 
 **double-tap-and-hold + move = drag** (sent as one-shot `mouse_drag` on release). Zoom badge
 (top-left) resets zoom; its events must not bubble into the screen container.
 
+## Panels and keyboard (app.js / styles.css)
+
+Panels **make room, they don't cover**: `setPanelHeight()` measures `panel.offsetHeight` into
+`--panel-h`, and `#app.panel-open { padding-bottom: var(--panel-h) }` shrinks the flex column so
+`screen-container` (and the letterboxed image inside it) stays fully visible above the panel.
+`offsetHeight` is valid even while the panel is still translated off-screen — transforms don't
+affect layout. The keyboard height is drag-resizable via `#kbdGrip` (clamped 30–75vh, persisted
+as `kbdHeight`), which sets an explicit `height` + `maxHeight: none` to beat the `.panel` 60vh cap.
+
+Keyboard has two layers (`#kbdLetters` / `#kbdSymbols`, toggled by `?123`); symbol keys need no
+wiring because the generic `.k[data-k]` handler just `type_text`s the character. Latching
+modifiers are **ctrl / alt / win**; `shift` joins `activeModifiers()` only when another modifier
+is already latched, so plain Shift+letter keeps the proven `type_text` uppercase path. Because
+Win latches, a bare Win press lives in the `start-menu` quick action instead.
+
 ## Known issues (ordered by impact)
 
 1. **AI control is a stub.** `ai_integration.py` always returns `"actions": []` — Claude chats about
