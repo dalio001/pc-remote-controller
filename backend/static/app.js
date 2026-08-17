@@ -7,11 +7,11 @@
 const state = {
   ws: null, connected: false, connecting: false,
   frameUrl: null, screenWidth: 1920, screenHeight: 1080,
-  shift: false, fnMode: false, activePanel: null,
+  shift: false, fnMode: false, symMode: false, activePanel: null,
   reconnectTimer: null, reconnectAttempts: 0, authFailed: false,
   pingInterval: null,
   lastClickTimer: null,
-  modifiers: { ctrl: false, alt: false },
+  modifiers: { ctrl: false, alt: false, win: false },
   // Client-side zoom of the remote screen. Implemented as a CSS transform on the
   // image, so getBoundingClientRect() - and therefore every existing coordinate
   // calculation - keeps working untouched.
@@ -39,6 +39,7 @@ const els = {
   scaleRange: $('scaleRange'), scaleValue: $('scaleValue'),
   apiKeyInput: $('apiKeyInput'), passwordInput: $('passwordInput'),
   zoomBadge: $('zoomBadge'), fullscreenBtn: $('fullscreenBtn'),
+  app: $('app'), kbdGrip: $('kbdGrip'), kbdLetters: $('kbdLetters'), kbdSymbols: $('kbdSymbols'),
 };
 
 // ===== WebSocket =====
@@ -319,10 +320,19 @@ document.addEventListener('fullscreenchange', () =>
   els.fullscreenBtn.classList.toggle('active', !!document.fullscreenElement));
 
 // ===== Panels =====
+// An open panel shrinks #app's content box rather than covering the screen, so the
+// remote screen stays visible above it. offsetHeight is valid even while the panel
+// is still translated off-screen - transforms don't affect layout.
+function setPanelHeight(panel) {
+  const h = panel ? panel.offsetHeight : 0;
+  document.documentElement.style.setProperty('--panel-h', h + 'px');
+  els.app.classList.toggle('panel-open', h > 0);
+}
+
 function openPanel(name) {
   if (state.activePanel === name) { closeAllPanels(); return; }
   closeAllPanels(); state.activePanel = name;
-  const panel = els[name]; if (panel) panel.classList.add('open');
+  const panel = els[name]; if (panel) { panel.classList.add('open'); setPanelHeight(panel); }
   document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
   const btnMap = { navPanel: 'btnNav', keyboardPanel: 'btnKeyboard', aiPanel: 'btnAI' };
   const btnId = btnMap[name]; if (btnId) $(btnId)?.classList.add('active');
@@ -330,8 +340,36 @@ function openPanel(name) {
 function closeAllPanels() {
   ['navPanel', 'keyboardPanel', 'aiPanel', 'settingsPanel'].forEach(n => { els[n]?.classList.remove('open'); });
   state.activePanel = null;
+  setPanelHeight(null);
   document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
 }
+
+// ===== Keyboard resize =====
+// Drag the grip to trade remote-screen height against key height. Clamped so the
+// panel can never swallow the screen or shrink below a usable key grid.
+function applyKbdHeight(px) {
+  const min = window.innerHeight * 0.3, max = window.innerHeight * 0.75;
+  const h = Math.max(min, Math.min(max, px));
+  els.keyboardPanel.style.height = h + 'px';
+  els.keyboardPanel.style.maxHeight = 'none';  // beats the .panel 60vh cap
+  if (state.activePanel === 'keyboardPanel') setPanelHeight(els.keyboardPanel);
+  return h;
+}
+const savedKbdHeight = +localStorage.getItem('kbdHeight');
+if (savedKbdHeight) applyKbdHeight(savedKbdHeight);
+
+let gripStartY = 0, gripStartH = 0;
+els.kbdGrip.addEventListener('touchstart', (e) => {
+  gripStartY = e.touches[0].clientY;
+  gripStartH = els.keyboardPanel.offsetHeight;
+}, { passive: true });
+els.kbdGrip.addEventListener('touchmove', (e) => {
+  e.preventDefault();  // dragging the grip must not scroll the page
+  applyKbdHeight(gripStartH + (gripStartY - e.touches[0].clientY));
+}, { passive: false });
+els.kbdGrip.addEventListener('touchend', () => {
+  localStorage.setItem('kbdHeight', els.keyboardPanel.offsetHeight);
+});
 
 // Mouse is the default mode, so closeAllPanels() alone left it as the only
 // control with no selected indicator.
@@ -371,13 +409,18 @@ function activeModifiers() {
   const mods = [];
   if (state.modifiers.ctrl) mods.push('ctrl');
   if (state.modifiers.alt) mods.push('alt');
+  if (state.modifiers.win) mods.push('win');
+  // Shift joins only alongside another modifier (Ctrl+Shift+Esc). Shift alone keeps
+  // using the proven type_text uppercase path below.
+  if (mods.length && state.shift) mods.push('shift');
   return mods;
 }
 function clearModifiers() {
-  state.modifiers.ctrl = false; state.modifiers.alt = false;
-  // Selected by data-action: these two buttons carry no id in index.html.
-  document.querySelectorAll('.k[data-action="ctrl"], .k[data-action="alt"]')
+  state.modifiers.ctrl = false; state.modifiers.alt = false; state.modifiers.win = false;
+  // Selected by data-action: these buttons carry no id in index.html.
+  document.querySelectorAll('.k[data-action="ctrl"], .k[data-action="alt"], .k[data-action="win"]')
     .forEach(b => b.classList.remove('active'));
+  toggleShift(false);
 }
 function toggleModifier(name, btn) {
   state.modifiers[name] = !state.modifiers[name];
@@ -402,17 +445,32 @@ document.querySelectorAll('.k[data-k]').forEach(btn => {
   });
 });
 
+// Keys that are just a keypress (and so route through any latched modifiers).
+const PLAIN_ACTIONS = ['backspace', 'enter', 'esc', 'tab', 'up', 'down', 'left', 'right'];
+
 document.querySelectorAll('.k[data-action]').forEach(btn => {
   btn.addEventListener('click', () => {
     const action = btn.dataset.action;
     if (action === 'shift') toggleShift();
     else if (action === 'fn') toggleFn();
+    else if (action === 'symbols') toggleSymbols();
     else if (action === 'ctrl') toggleModifier('ctrl', btn);
     else if (action === 'alt') toggleModifier('alt', btn);
-    else if (action === 'backspace') sendKey('backspace');
-    else if (action === 'enter') sendKey('enter');
+    else if (action === 'win') toggleModifier('win', btn);
+    else if (PLAIN_ACTIONS.includes(action)) sendKey(action);
   });
 });
+
+// Symbols layer: swaps which key grid is visible. The generic .k[data-k] handler
+// types whatever character the button carries, so no per-symbol wiring is needed.
+function toggleSymbols() {
+  state.symMode = !state.symMode;
+  els.kbdLetters.classList.toggle('hidden', state.symMode);
+  els.kbdSymbols.classList.toggle('hidden', !state.symMode);
+  $('symBtn').classList.toggle('active', state.symMode);
+  $('symBtn').textContent = state.symMode ? 'ABC' : '?123';
+  if (state.activePanel === 'keyboardPanel') setPanelHeight(els.keyboardPanel);
+}
 
 function toggleShift(force) { state.shift = force !== undefined ? force : !state.shift; $('shiftBtn')?.classList.toggle('active', state.shift); }
 function toggleFn() {
@@ -457,6 +515,8 @@ const quickActions = {
   'paste': () => send({ type: 'hotkey', keys: ['ctrl', 'v'] }),
   // Task View stays open after the hotkey, so a follow-up tap picks the window.
   'task-view': () => send({ type: 'hotkey', keys: ['win', 'tab'] }),
+  // The keyboard's Win key latches for combos, so a bare Win press lives here.
+  'start-menu': () => send({ type: 'key_press', key: 'win' }),
   'task-manager': () => send({ type: 'hotkey', keys: ['ctrl', 'shift', 'esc'] }),
   'desktop': () => send({ type: 'hotkey', keys: ['win', 'd'] }),
   'lock': () => send({ type: 'hotkey', keys: ['win', 'l'] }),
