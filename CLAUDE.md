@@ -64,6 +64,14 @@ Win latches, a bare Win press lives in the `start-menu` quick action instead.
    requires Google sign-in as a specific address — anonymous visitors get a 302 to Google and
    never reach the app, even holding the right password. Confirmed working on the free plan.
    The policy applies to ngrok traffic only, so LAN and Tailscale are unaffected.
+   **Restricting *who* gets in is a second rule with a CEL expression, never a field on the
+   oauth action**: `allow_emails` does not exist (policy rejected, tunnel dead), and `auth_id`
+   is only a session id — it authenticates the visitor while letting *any* Google account
+   through, and still 302s to Google, so it looks like it works. Both were shipped here before
+   being caught. A 302 proves nothing; ngrok validates expression field paths
+   (`ERR_NGROK_2200 undefined field`), so break the field name on purpose to prove the rule is
+   evaluated at all. Free plan allows **one endpoint**, so a second test tunnel needs the live
+   one stopped first (`ERR_NGROK_334`).
    `backend/tunnel.py` spawns ngrok and reads the URL back from its local API at
    `127.0.0.1:4040`. Outbound only, so no inbound firewall rule. Free `ngrok-free.app` domains
    show a one-time browser interstitial; it affects top-level navigation only, not `/ws`.

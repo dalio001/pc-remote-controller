@@ -1,13 +1,35 @@
 # Copy to ngrok-policy.yml and put your own email in. That file is gitignored.
 #
-# This runs at the ngrok edge, BEFORE a request ever reaches this app: a stranger
-# with the URL is stopped at Google sign-in and never sees the password screen.
-# Only the address below is allowed through.
+# Runs at the ngrok edge, BEFORE a request reaches the app, so a stranger with the
+# URL is stopped here and never sees the password screen. LAN and Tailscale do not
+# pass through ngrok and are unaffected.
 #
-# LAN and Tailscale traffic does not pass through ngrok, so it is unaffected.
+# TWO TRAPS, both hit for real:
+#
+#   1. `allow_emails` DOES NOT EXIST on the oauth action. ngrok rejects the whole
+#      policy (ERR_NGROK_2203) and the tunnel then fails to start. The valid fields
+#      are: auth_id, provider, client_id, client_secret, scopes, authz_url_params,
+#      max_session_duration.
+#
+#   2. `auth_id` does NOT restrict anyone - it is only a session identifier. Using
+#      it alone authenticates the visitor but lets ANY Google account through,
+#      while looking like it works (you still get redirected to Google).
+#
+# Restricting WHO gets in is therefore a SECOND rule with a CEL expression, below.
+# ngrok validates these expressions against a real schema, so a typo in the field
+# path fails loudly at startup (ERR_NGROK_2200 "undefined field") rather than
+# silently letting everyone in - verify by deliberately breaking the field name.
 on_http_request:
+  # 1. Force a Google sign-in.
   - actions:
       - type: oauth
         config:
           provider: google
-          auth_id: you@example.com
+
+  # 2. Allow only this identity; deny everyone else.
+  - expressions:
+      - "actions.ngrok.oauth.identity.email != 'you@example.com'"
+    actions:
+      - type: deny
+        config:
+          status_code: 403
